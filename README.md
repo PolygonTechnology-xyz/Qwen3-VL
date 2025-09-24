@@ -856,7 +856,7 @@ python -m vllm.entrypoints.openai.api_server \
   --served-model-name Qwen/Qwen3-VL-235B-A22B-Instruct \
   --tensor-parallel-size 8 \
   --mm-encoder-tp-mode data \
-  --enable-expert-paralle \
+  --enable-expert-parallel \
   --host 0.0.0.0 \
   --port 22002 \
   --dtype bfloat16 \
