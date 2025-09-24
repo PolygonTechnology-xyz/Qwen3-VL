@@ -125,15 +125,15 @@ We strongly advise users especially those in mainland China to use ModelScope. `
 Here we show a code snippet to show you how to use the chat model with `transformers`:
 
 ```python
-from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+from transformers import Qwen3VLMoeForConditionalGeneration, AutoProcessor
 
 # default: Load the model on the available device(s)
-model = Qwen3VLForConditionalGeneration.from_pretrained(
+model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-235B-A22B-Instruct", dtype="auto", device_map="auto"
 )
 
 # We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
-# model = Qwen3VLForConditionalGeneration.from_pretrained(
+# model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
 #     "Qwen/Qwen3-VL-235B-A22B-Instruct",
 #     dtype=torch.bfloat16,
 #     attn_implementation="flash_attention_2",
@@ -458,10 +458,10 @@ We provide two methods for fine-grained control over the image size input to the
 - Define min_pixels and max_pixels: Images will be resized to maintain their aspect ratio within the range of min_pixels and max_pixels
 
 ```python
-from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+from transformers import Qwen3VLMoeForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
-model = Qwen3VLForConditionalGeneration.from_pretrained(
+model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-235B-A22B-Instruct", dtype="auto", device_map="auto"
 )
 
@@ -588,10 +588,10 @@ We recommend setting appropriate values for the `min_pixels` and `max_pixels` pa
 Alternatively, you can use the `total_pixels` parameter to limit the total number of tokens in the video (it is recommended to set this value below 24576 * 32 * 32 to avoid excessively long input sequences). For more details on parameter usage and processing logic, please refer to the `fetch_video` function in `qwen_vl_utils/vision_process.py`.
 
 ```python
-from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+from transformers import Qwen3VLMoeForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
-model = Qwen3VLForConditionalGeneration.from_pretrained(
+model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-235B-A22B-Instruct", dtype="auto", device_map="auto"
 )
 
@@ -727,9 +727,9 @@ Also, you should have a hardware that is compatible with Flash-Attention 2. Read
 To load and run a model using Flash Attention-2, simply add `attn_implementation="flash_attention_2"` when loading the model as follows:
 
 ```python
-from transformers import Qwen3VLForConditionalGeneration
+from transformers import Qwen3VLMoeForConditionalGeneration
 
-model = Qwen3VLForConditionalGeneration.from_pretrained(
+model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-235B-A22B-Instruct", 
     torch_dtype=torch.bfloat16, 
     attn_implementation="flash_attention_2",
