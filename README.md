@@ -840,7 +840,7 @@ cd docker && bash run_web_demo.sh -c /your/path/to/qwen3vl/weight --port 8881
 
 We recommend using vLLM for fast Qwen3-VL deployment and inference. You need to install `vllm>=0.11.0` to enable Qwen3-VL support. You can also use our [official docker image](#-docker).
 
-You can also check [vLLM official documentation](https://docs.vllm.ai/en/latest/serving/multimodal_inputs.html) for more details about online serving and offline inference.
+Please check [vLLM official documentation](https://docs.vllm.ai/en/latest/serving/multimodal_inputs.html) for more details about online serving and offline inference for multimodal models.
 
 ### Installation
 ```bash
@@ -906,7 +906,7 @@ messages = [
 
 start = time.time()
 response = client.chat.completions.create(
-    model="Qwen/Qwen3-VL-235B-A22B-Instruct",
+    model="Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
     messages=messages,
     max_tokens=2048
 )
@@ -944,7 +944,7 @@ messages = [
 
 start = time.time()
 response = client.chat.completions.create(
-    model="Qwen/Qwen3-VL-235B-A22B-Instruct",
+    model="Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
     messages=messages,
     max_tokens=2048
 )
@@ -1020,16 +1020,14 @@ if __name__ == '__main__':
     ]
 
     # TODO: change to your own checkpoint path
-    checkpoint_path = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    checkpoint_path = "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
     processor = AutoProcessor.from_pretrained(checkpoint_path)
     inputs = [prepare_inputs_for_vllm(message, processor) for message in [messages]]
 
     llm = LLM(
         model=checkpoint_path,
-        trust_remote_code=True,
-        gpu_memory_utilization=0.70,
-        enforce_eager=False,
-        quantization="fp8",
+        mm_encoder_tp_mode="data",
+        enable_expert_parallel=True,
         tensor_parallel_size=torch.cuda.device_count(),
         seed=0
     )
