@@ -128,10 +128,9 @@ We are preparing [cookbooks](https://github.com/QwenLM/Qwen3-VL/tree/main/cookbo
 
 Below, we provide simple examples to show how to use Qwen3-VL with 🤖 ModelScope and 🤗 Transformers.
 
-The code of Qwen3-VL has been in the latest Hugging face transformers and we advise you to build from source with command:
 ```
-pip install git+https://github.com/huggingface/transformers
-# pip install transformers==4.57.0 # currently, V4.57.0 is not released
+# The Qwen3-VL model requires transformers >= 4.57.0
+pip install "transformers>=4.57.0"
 ```
 
 ### 🤖 ModelScope
@@ -881,6 +880,7 @@ vllm serve Qwen/Qwen3-VL-235B-A22B-Instruct-FP8 \
   --mm-encoder-tp-mode data \
   --enable-expert-parallel \
   --async-scheduling \
+  --media-io-kwargs '{"video": {"num_frames": -1}}' \
   --host 0.0.0.0 \
   --port 22002
 ```
@@ -960,10 +960,18 @@ messages = [
 ]
 
 start = time.time()
+
+# When vLLM is launched with `--media-io-kwargs '{"video": {"num_frames": -1}}'`,
+# video frame sampling can be configured via `extra_body` (e.g., by setting `fps`).
+# This feature is currently supported only in vLLM.
+#
+# By default, `fps=2` and `do_sample_frames=True`.
+# With `do_sample_frames=True`, you can customize the `fps` value to set your desired video sampling rate.
 response = client.chat.completions.create(
     model="Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
     messages=messages,
-    max_tokens=2048
+    max_tokens=2048,
+    extra_body={"mm_processor_kwargs": {"fps": 2, "do_sample_frames": True}}
 )
 
 print(f"Response costs: {time.time() - start:.2f}s")
