@@ -347,11 +347,11 @@ Using the official HF processor, we can conveniently control the budget of visua
 ```python
 processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-235B-A22B-Instruct")
 
-# budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280
+# budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280 (32× spatial compression)
 processor.image_processor.size = {"longest_edge": 1280*32*32, "shortest_edge": 256*32*32}
 
-# budget for video processor, we can set the number of visual tokens of a single video to 256-16384
-processor.video_processor.size = {"longest_edge": 16384*32*32, "shortest_edge": 256*32*32}
+# budget for video processor, we can set the number of visual tokens of a single video to 256-16384 (32× spatial compression + 2× temporal compression)
+processor.video_processor.size = {"longest_edge": 16384*32*32*2, "shortest_edge": 256*32*32*2}
 ```
 
 - You can further control the **sample fps** or **sample frames** of video, as shown below.
