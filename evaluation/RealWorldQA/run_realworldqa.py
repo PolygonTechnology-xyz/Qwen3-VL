@@ -10,7 +10,6 @@ from typing import List, Dict, Any
 import torch
 import warnings
 import string
-import traceback
 
 # vLLM imports
 from vllm import LLM, SamplingParams
@@ -18,64 +17,15 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor
 
 # Local imports from refactored files
-from dataset_utils import load_dataset, dump_image, MMMU_preproc
+from dataset_utils import load_dataset, dump_image, build_realworldqa_prompt
 from eval_utils import build_judge, eval_single_sample
 
 # Set vLLM multiprocessing method
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
-def build_mmmu_prompt(line, dump_image_func, dataset):
-    """Build MMMU dataset prompt with standard resolution settings."""
-    # Standard resolution settings
-    MIN_PIXELS = 1280*28*28  # ~1M pixels
-    MAX_PIXELS = 5120*28*28  # ~4M pixels
-    
-    tgt_path = dump_image_func(line)
-    question = line['question']
-    options = {cand: line[cand] for cand in string.ascii_uppercase if cand in line and not pd.isna(line[cand])}
-    options_prompt = 'Options:\n'
-    for key, item in options.items():
-        options_prompt += f'{key}. {item}\n'
-    hint = line['hint'] if ('hint' in line and not pd.isna(line['hint'])) else None
-    prompt = ''
-    if hint is not None:
-        prompt += f'Hint: {hint}\n'
-    prompt += f'Question: {question}\n'
-    if len(options):
-        prompt += options_prompt
-        prompt += 'Please select the correct answer from the options above. \n'
-    prompt = prompt.rstrip()
-    
-    # Build messages in standard conversation format
-    content = []
-    if isinstance(tgt_path, list):
-        for p in tgt_path:
-            content.append({
-                "type": "image",
-                "image": p,
-                "min_pixels": MIN_PIXELS,
-                "max_pixels": MAX_PIXELS
-            })
-    else:
-        content.append({
-            "type": "image", 
-            "image": tgt_path,
-            "min_pixels": MIN_PIXELS,
-            "max_pixels": MAX_PIXELS
-        })
-    content.append({"type": "text", "text": prompt})
-    
-    # Return messages in standard conversation format
-    messages = [{
-        "role": "user",
-        "content": content
-    }]
-    
-    return messages
-
 def prepare_inputs_for_vllm(messages, processor):
     """
-    Prepare inputs for vLLM (following the examples in README.md).
+    Prepare inputs for vLLM.
     
     Args:
         messages: List of messages in standard conversation format
@@ -107,17 +57,32 @@ def prepare_inputs_for_vllm(messages, processor):
     }
 
 def run_inference(args):
-    """Run inference on the MMMU dataset using vLLM."""
+    """Run inference on the RealWorldQA dataset using vLLM."""
     print("\n" + "="*80)
-    print("🚀 MMMU Inference with vLLM (High-Speed Mode)")
+    print("🚀 RealWorldQA Inference with vLLM (High-Speed Mode)")
     print("="*80 + "\n")
     
+    # Set up data directory
+    if args.data_dir:
+        os.environ['LMUData'] = args.data_dir
+    elif 'LMUData' not in os.environ:
+        raise ValueError("Please specify --data-dir or set LMUData environment variable")
+    
+    print(f"✓ Data directory: {os.environ['LMUData']}")
+    
     # Load dataset
+    print(f"Loading dataset: {args.dataset}")
     data = load_dataset(args.dataset)
     print(f"✓ Loaded {len(data)} samples from {args.dataset}")
     
+    # DEBUG: Process only first N samples if specified
+    if os.getenv('DEBUG_SAMPLE_SIZE'):
+        debug_size = int(os.getenv('DEBUG_SAMPLE_SIZE'))
+        data = data.iloc[:debug_size]
+        print(f"⚠️  DEBUG MODE: Only processing {len(data)} samples")
+    
     # Set up image root directory
-    img_root = os.path.join(os.environ['LMUData'], 'images', 'MMMU')
+    img_root = os.path.join(os.environ['LMUData'], 'images', args.dataset)
     os.makedirs(img_root, exist_ok=True)
     
     # Set up dump_image function
@@ -127,11 +92,10 @@ def run_inference(args):
     # Create output directory
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
 
-    # Set up CoT prompt if enabled
-    cot_prompt = ""
-    if args.use_cot:
-        cot_prompt = args.cot_prompt if args.cot_prompt else " If you are uncertain or the problem is too complex, make a reasoned guess based on the information provided. Avoid repeating steps indefinitely—provide your best guess even if unsure. Determine whether to think step by step based on the difficulty of the question, considering all relevant information before answering."
-        print(f"✓ Using CoT prompt: {cot_prompt[:50]}...")
+    # Set resolution parameters
+    min_pixels = args.min_pixels if args.min_pixels is not None else 768*28*28
+    max_pixels = args.max_pixels if args.max_pixels is not None else 5120*28*28
+    print(f"✓ Image resolution: min_pixels={min_pixels}, max_pixels={max_pixels}")
 
     # Set up generation parameters (vLLM SamplingParams format)
     sampling_params = SamplingParams(
@@ -196,13 +160,7 @@ def run_inference(args):
                 line_dict[k] = float(v)
         
         # Build prompt
-        messages = build_mmmu_prompt(line, dump_image_func, args.dataset)
-        
-        # Add CoT prompt
-        if args.use_cot and len(messages) > 0 and len(messages[0]['content']) > 0:
-            last_content = messages[0]['content'][-1]
-            if last_content['type'] == 'text':
-                last_content['text'] += cot_prompt
+        messages = build_realworldqa_prompt(line, dump_image_func, min_pixels, max_pixels)
         
         # Prepare input for vLLM
         vllm_input = prepare_inputs_for_vllm(messages, processor)
@@ -235,10 +193,11 @@ def run_inference(args):
         response = output.outputs[0].text
         index = line_dict['index']
 
+        # Handle </think> tag
         response_final = str(response).split("</think>")[-1].strip()
         
         result = {
-            "question_id": int(index) if isinstance(index, np.integer) else index,
+            "question_id": int(index) if isinstance(index, (int, np.integer)) else index,
             "annotation": line_dict,
             "task": args.dataset,
             "result": {"gen": response_final, "gen_raw": response},
@@ -256,6 +215,16 @@ def run_inference(args):
 
 def run_evaluation(args):
     """Run evaluation on inference results."""
+    print("\n" + "="*80)
+    print("📊 RealWorldQA Evaluation")
+    print("="*80 + "\n")
+    
+    # Set up data directory
+    if args.data_dir:
+        os.environ['LMUData'] = args.data_dir
+    elif 'LMUData' not in os.environ:
+        raise ValueError("Please specify --data-dir or set LMUData environment variable")
+    
     # Load results
     results = []
     with open(args.input_file, 'r') as f:
@@ -268,40 +237,34 @@ def run_evaluation(args):
     data = pd.DataFrame.from_records(results)
     data = data.sort_values(by='index')
     data['prediction'] = [str(x) for x in data['prediction']]
-    # If not choice label, then use lower case
-    for k in data.keys():
+    
+    # Convert column names to lowercase
+    for k in list(data.keys()):
         data[k.lower() if k not in list(string.ascii_uppercase) else k] = data.pop(k)
-
-    # Load dataset
-    meta = load_dataset(args.dataset)
-
-    # Validation
-    print(f"len(data): {len(data)}")
-    print(f"len(meta): {len(meta)}")
-    meta_q_map = {x: y for x, y in zip(meta['index'], meta['question'])}
-    data_map = {x: y for x, y in zip(data['index'], data['question'])}
-    for k in data_map:
-        assert k in meta_q_map, (
-            f'eval_file should be the same as or a subset of dataset MMMU_DEV_VAL'
+    
+    print(f"✓ Loaded {len(data)} results from {args.input_file}")
+    
+    # Create output directory
+    output_dir = os.path.dirname(args.output_file)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Build judge model (if specified)
+    model = None
+    if args.eval_model:
+        model = build_judge(
+            model=args.eval_model,
+            api_type=getattr(args, 'api_type', 'dash')
         )
-
-    answer_map = {i: c for i, c in zip(meta['index'], meta['answer'])}
-    data = MMMU_preproc(data)
-    answer_map = {k: (v if v in list(string.ascii_uppercase) else 'A') for k, v in answer_map.items()}
-    data = data[data['index'].isin(answer_map)]
-    data['GT'] = [answer_map[idx] for idx in data['index']]
-    items = []
-    for i in range(len(data)):
-        item = data.iloc[i]
-        items.append(item)
-
-    # Build judge model
-    model = build_judge(
-        model=getattr(args, 'eval_model', 'gpt-3.5-turbo-0125'),
-        api_type=getattr(args, 'api_type', 'dash')
-    )
+        print(f"✓ Evaluation model: {args.eval_model}")
+    else:
+        print("⚠️  No evaluation model specified, using rule-based extraction only")
     
     # Prepare evaluation tasks
+    items = []
+    for i in range(len(data)):
+        item = data.iloc[i].to_dict()
+        items.append(item)
+    
     eval_tasks = []
     for item in items:
         eval_tasks.append((model, item))
@@ -319,12 +282,12 @@ def run_evaluation(args):
                 eval_results.append(result)
             except Exception as e:
                 print(f"Error processing task: {e}")
-                print(f"Task details: {task}")
                 raise
     else:
         # Normal mode: process all samples with threading
         from concurrent.futures import ThreadPoolExecutor
         nproc = getattr(args, 'nproc', 4)
+        print(f"✓ Using {nproc} parallel processes")
         with ThreadPoolExecutor(max_workers=nproc) as executor:
             for result in tqdm(executor.map(eval_single_sample, eval_tasks), 
                              total=len(eval_tasks), desc="Evaluating"):
@@ -333,49 +296,45 @@ def run_evaluation(args):
     # Calculate overall accuracy
     accuracy = sum(r['hit'] for r in eval_results) / len(eval_results)
     
-    # Calculate accuracy by split
-    results_by_split = {}
-    for result in eval_results:
-        split = result.get('split', 'unknown')
-        if split not in results_by_split:
-            results_by_split[split] = []
-        results_by_split[split].append(result)
-    
-    accuracy_by_split = {}
-    for split, split_results in results_by_split.items():
-        split_accuracy = sum(r['hit'] for r in split_results) / len(split_results)
-        accuracy_by_split[split] = split_accuracy
-        print(f"Accuracy for {split} split: {split_accuracy:.4f} ({sum(r['hit'] for r in split_results)}/{len(split_results)})")
-    
     # Save results
     output_df = pd.DataFrame(eval_results)
     output_df.to_csv(args.output_file, index=False)
     
-    # Save accuracy
-    with open(args.output_file.replace('.csv', '_acc.json'), 'w') as f:
+    # Save accuracy to JSON
+    acc_file = args.output_file.replace('.csv', '_acc.json')
+    with open(acc_file, 'w') as f:
         json.dump({
             "overall_accuracy": accuracy,
-            "accuracy_by_split": accuracy_by_split
+            "task_samples": len(results),
+            "correct": sum(r['hit'] for r in eval_results),
+            "total": len(eval_results)
         }, f, indent=2)
     
     print(f"\n{'='*50}")
     print(f"Evaluation Results:")
     print(f"{'='*50}")
-    print(f"Overall accuracy: {accuracy:.4f}")
+    print(f"Overall accuracy: {accuracy:.4f} ({sum(r['hit'] for r in eval_results)}/{len(eval_results)})")
     print(f"{'='*50}\n")
+    
+    print(f"✓ Detailed results saved to {args.output_file}")
+    print(f"✓ Accuracy saved to {acc_file}")
 
 def main():
-    parser = argparse.ArgumentParser(description="MMMU Evaluation with vLLM")
+    parser = argparse.ArgumentParser(description="RealWorldQA Evaluation with vLLM")
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
     # Inference parser
     infer_parser = subparsers.add_parser("infer", help="Run inference with vLLM")
     infer_parser.add_argument("--model-path", type=str, required=True, help="Path to the model")
-    infer_parser.add_argument("--dataset", type=str, default="MMMU_DEV_VAL", help="Dataset name")
-    infer_parser.add_argument("--data-dir", type=str, help="The absolute path of MMMU_DEV_VAL.tsv")
+    infer_parser.add_argument("--dataset", type=str, default="RealWorldQA", help="Dataset name")
+    infer_parser.add_argument("--data-dir", type=str, help="Data directory (LMUData)")
     infer_parser.add_argument("--output-file", type=str, required=True, help="Output file path")
-    infer_parser.add_argument("--use-cot", action="store_true", help="Use Chain-of-Thought prompting")
-    infer_parser.add_argument("--cot-prompt", type=str, default="", help="Custom Chain-of-Thought prompt")
+    
+    # Image resolution parameters
+    infer_parser.add_argument("--min-pixels", type=int, default=None,
+                            help="Minimum pixels for image (default: 768*28*28)")
+    infer_parser.add_argument("--max-pixels", type=int, default=None,
+                            help="Maximum pixels for image (default: 5120*28*28)")
     
     # vLLM specific parameters
     infer_parser.add_argument("--tensor-parallel-size", type=int, default=None, 
@@ -383,41 +342,37 @@ def main():
     infer_parser.add_argument("--gpu-memory-utilization", type=float, default=0.9,
                             help="GPU memory utilization (0.0-1.0, default: 0.9)")
     infer_parser.add_argument("--max-model-len", type=int, default=128000,
-                            help="Maximum model context length (default: 128000, balance between performance and memory)")
+                            help="Maximum model context length (default: 128000)")
     infer_parser.add_argument("--max-images-per-prompt", type=int, default=10,
                             help="Maximum images per prompt (default: 10)")
     
     # Generation parameters
     infer_parser.add_argument("--max-new-tokens", type=int, default=32768, 
-                            help="Maximum number of tokens to generate (default: 2048)")
+                            help="Maximum number of tokens to generate (default: 32768)")
     infer_parser.add_argument("--temperature", type=float, default=0.7, 
-                            help="Temperature for sampling (default: 0.7 for greedy-like decoding)")
+                            help="Temperature for sampling (default: 0.7)")
     infer_parser.add_argument("--top-p", type=float, default=0.8, 
-                            help="Top-p for sampling (default: 0.8 for greedy-like decoding)")
+                            help="Top-p for sampling (default: 0.8)")
     infer_parser.add_argument("--top-k", type=int, default=20, 
-                            help="Top-k for sampling (default: 20 for greedy decoding)")
+                            help="Top-k for sampling (default: 20)")
     infer_parser.add_argument("--repetition-penalty", type=float, default=1.0,
-                            help="Repetition penalty (default: 1.0, increase to 1.2-1.5 to reduce repetition)")
+                            help="Repetition penalty (default: 1.0)")
     infer_parser.add_argument("--presence-penalty", type=float, default=1.5,
-                            help="Presence penalty (default: 1.5, range: 0.0-2.0, penalize tokens that have already appeared)")
+                            help="Presence penalty (default: 1.5)")
     
     # Evaluation parser
     eval_parser = subparsers.add_parser("eval", help="Run evaluation")
-    eval_parser.add_argument("--data-dir", type=str, help="The absolute path of MMMU_DEV_VAL.tsv")
+    eval_parser.add_argument("--data-dir", type=str, help="Data directory (LMUData)")
     eval_parser.add_argument("--input-file", type=str, required=True, help="Input file with inference results")
     eval_parser.add_argument("--output-file", type=str, required=True, help="Output file path")
-    eval_parser.add_argument("--dataset", type=str, default="MMMU_DEV_VAL", help="Dataset name")
-    eval_parser.add_argument("--eval-model", type=str, default="gpt-3.5-turbo-0125",
-                            help="Model to use for evaluation (default: gpt-3.5-turbo-0125)")
+    eval_parser.add_argument("--dataset", type=str, default="RealWorldQA", help="Dataset name")
+    eval_parser.add_argument("--eval-model", type=str, default=None,
+                            help="Model to use for evaluation (default: None, use rule-based only)")
     eval_parser.add_argument("--api-type", type=str, default="dash", choices=["dash", "mit"],
                             help="API type for evaluation")
     eval_parser.add_argument("--nproc", type=int, default=4, help="Number of processes to use")
     
     args = parser.parse_args()
-    
-    # Set data directory if provided
-    if hasattr(args, 'data_dir') and args.data_dir:
-        os.environ['LMUData'] = args.data_dir
     
     # Automatically set tensor_parallel_size
     if args.command == 'infer' and args.tensor_parallel_size is None:

@@ -1,23 +1,23 @@
-# MMMU Benchmark Evaluation
+# MathVision Benchmark Evaluation
 
-This directory contains the implementation for evaluating vision-language models on the MMMU (Massive Multi-discipline Multimodal Understanding) benchmark using vLLM for high-speed inference.
+This directory contains the implementation for evaluating vision-language models on the MathVision benchmark using vLLM for high-speed inference.
 
 ## Overview
 
-The MMMU benchmark evaluates models across diverse disciplines with multi-modal questions. This implementation provides:
+MathVision is a mathematical visual reasoning benchmark that evaluates models' ability to solve mathematical problems based on visual information. This implementation provides:
 
 - **High-speed inference** using vLLM with automatic batch optimization
-- **Flexible evaluation** using GPT-based judge models
-- **Support for thinking models** with extended reasoning
+- **Two-stage evaluation** using rule-based and GPT-4o-based answer extraction
+- **Support for thinking models** with extended reasoning capabilities
 - **Modular code structure** for easy maintenance and extension
 
 ## Project Structure
 
 ```
-mmmu/
-├── run_mmmu.py           # Main script for inference and evaluation
+MathVision/
+├── run_mathv.py          # Main script for inference and evaluation
 ├── dataset_utils.py      # Dataset loading and preprocessing utilities
-├── eval_utils.py         # Evaluation logic and judge model wrappers
+├── eval_utils.py         # Evaluation logic and answer extraction
 ├── common_utils.py       # Common utilities for image processing, file I/O
 ├── infer_instruct.sh     # Inference script for instruct models
 ├── infer_think.sh        # Inference script for thinking models
@@ -41,6 +41,8 @@ Key dependencies:
 - `qwen_vl_utils` - Qwen VL utilities for vision processing
 - `pandas`, `numpy` - Data processing
 - `Pillow` - Image processing
+- `latex2sympy2` - LaTeX to symbolic math conversion (optional)
+- `openpyxl` - Excel file handling
 - `requests` - API calls for evaluation
 
 ### Environment Variables
@@ -63,7 +65,7 @@ export MIT_SPIDER_URL="your-api-endpoint"
 
 ### 1. Inference
 
-Run inference on MMMU dataset using an instruct model:
+Run inference on MathVision dataset using an instruct model:
 
 ```bash
 bash infer_instruct.sh
@@ -72,10 +74,10 @@ bash infer_instruct.sh
 Or customize the inference:
 
 ```bash
-python run_mmmu.py infer \
+python run_mathv.py infer \
     --model-path /path/to/Qwen3-VL-Instruct \
     --data-dir /path/to/data \
-    --dataset MMMU_DEV_VAL \
+    --dataset MathVision \
     --output-file results/predictions.jsonl \
     --max-new-tokens 32768 \
     --temperature 0.7 \
@@ -93,7 +95,7 @@ bash infer_think.sh
 
 ### 2. Evaluation
 
-Evaluate the inference results using a judge model:
+Evaluate the inference results using GPT-4o as a judge:
 
 ```bash
 bash eval_instruct.sh
@@ -102,12 +104,12 @@ bash eval_instruct.sh
 Or customize the evaluation:
 
 ```bash
-python run_mmmu.py eval \
+python run_mathv.py eval \
     --data-dir /path/to/data \
     --input-file results/predictions.jsonl \
     --output-file results/evaluation.csv \
-    --dataset MMMU_DEV_VAL \
-    --eval-model gpt-3.5-turbo-0125 \
+    --dataset MathVision \
+    --eval-model gpt-4o-2024-05-13 \
     --api-type dash \
     --nproc 16
 ```
@@ -118,8 +120,10 @@ python run_mmmu.py eval \
 
 **Basic Arguments:**
 - `--model-path`: Path to the Qwen3-VL model directory (required)
-- `--data-dir`: Directory to store/load MMMU dataset (required)
-- `--dataset`: Dataset name, default: `MMMU_DEV_VAL`
+- `--data-dir`: Directory to store/load MathVision dataset (required)
+- `--dataset`: Dataset name (default: `MathVision`)
+  - `MathVision`: Full dataset with ~3,000 samples
+  - `MathVision_MINI`: Mini version for quick testing
 - `--output-file`: Path to save inference results in JSONL format (required)
 
 **vLLM Arguments:**
@@ -138,19 +142,20 @@ python run_mmmu.py eval \
 
 **Advanced Options:**
 - `--use-cot`: Enable Chain-of-Thought prompting for better reasoning
-- `--cot-prompt`: Custom CoT prompt (optional)
+- `--cot-prompt`: Custom CoT prompt (default: " Let's think step by step.")
+- `--num-samples`: Number of samples to process (optional, for testing)
 
 ### Evaluation Mode
 
 **Basic Arguments:**
-- `--data-dir`: Directory containing MMMU dataset (required)
+- `--data-dir`: Directory containing MathVision dataset (required)
 - `--input-file`: Inference results file in JSONL format (required)
 - `--output-file`: Path to save evaluation results in CSV format (required)
-- `--dataset`: Dataset name, must match inference (default: `MMMU_DEV_VAL`)
+- `--dataset`: Dataset name, must match inference (default: `MathVision`)
 
 **Judge Model Arguments:**
-- `--eval-model`: Judge model name (default: `gpt-3.5-turbo-0125`)
-  - Options: `gpt-3.5-turbo-0125`, `gpt-4-0125-preview`, `gpt-4o`, etc.
+- `--eval-model`: Judge model name (default: `gpt-4o`)
+  - Options: `gpt-4o`, `gpt-4o-2024-05-13`, `gpt-3.5-turbo-0125`, etc.
 - `--api-type`: API service type (default: `dash`)
   - `dash`: DashScope API (Alibaba Cloud)
   - `mit`: Custom OpenAI-compatible API
@@ -167,13 +172,13 @@ The inference script generates a JSONL file where each line contains:
   "question_id": 123,
   "annotation": {
     "index": 123,
-    "question": "What is shown in the image?",
-    "A": "Option A",
-    "B": "Option B",
-    "answer": "A",
+    "question": "What is the area of the triangle?",
+    "answer": "12",
+    "category": "Geometry",
+    "choices": "[]",
     ...
   },
-  "task": "MMMU_DEV_VAL",
+  "task": "MathVision",
   "result": {
     "gen": "The final answer",
     "gen_raw": "Raw model output including thinking process"
@@ -184,20 +189,21 @@ The inference script generates a JSONL file where each line contains:
 
 ### Evaluation Output
 
-The evaluation script generates two files:
+The evaluation script generates multiple files:
 
-1. **CSV file** (`*_eval_results.csv`): Detailed results for each sample
-   - Columns: `index`, `question`, `prediction`, `extracted_answer`, `extraction_method`, `gt`, `hit`, `split`
+1. **Intermediate results** (`*_eval_results.xlsx`): Raw predictions with metadata
+2. **Detailed evaluation** (`*_eval_results_eval.xlsx`): Results with extracted answers
+   - Columns: `index`, `question`, `prediction`, `answer`, `res` (extracted), `log`, `extract_model`, `extract_flag`, `category`
+3. **Score summary** (`*_eval_results_eval_score.csv`): Accuracy by category
 
-2. **JSON file** (`*_eval_results_acc.json`): Accuracy summary
-   ```json
-   {
-     "overall_accuracy": 0.7234,
-     "accuracy_by_split": {
-       "validation": 0.7234
-     }
-   }
-   ```
+Example score summary:
+```
+Subject         | tot | prefetch | hit | prefetch_rate | acc
+----------------|-----|----------|-----|---------------|------
+Overall         | 3000| 2400     | 2100| 80.0          | 70.0
+Algebra         | 800 | 640      | 560 | 80.0          | 70.0
+Geometry        | 750 | 600      | 525 | 80.0          | 70.0
+```
 
 ## Model-Specific Configurations
 
@@ -214,7 +220,7 @@ Use standard parameters for balanced performance:
 --presence-penalty 1.5
 ```
 
-### Thinking Models (e.g., Qwen3-VL-4B-Thinking)
+### Thinking Models (e.g., Qwen3-VL-4B-Thinking, Qwen3-VL-30B-Thinking)
 
 Use extended parameters for deeper reasoning:
 
@@ -247,6 +253,10 @@ Use extended parameters for deeper reasoning:
    - 128000: Default, works well for most cases
    - 64000: Reduces memory usage by ~40%
 
+5. **Image Resolution**: MathVision uses optimized resolution (768×28×28 to 5120×28×28)
+   - Lower min_pixels for faster processing
+   - Higher max_pixels for better accuracy on complex diagrams
+
 ## Troubleshooting
 
 ### Common Issues
@@ -269,55 +279,77 @@ export VLLM_WORKER_MULTIPROC_METHOD=spawn
 **3. Evaluation API Errors**
 - Verify API credentials are set correctly
 - Check API endpoint connectivity
+- Monitor rate limits
 - Increase `--nproc` value if rate-limited (up to 32)
 
 **4. Dataset Download Issues**
 The dataset is automatically downloaded from:
 ```
-https://opencompass.openxlab.space/utils/VLMEval/MMMU_DEV_VAL.tsv
+https://opencompass.openxlab.space/utils/VLMEval/MathVision.tsv
 ```
 If download fails, manually download and place in `--data-dir`.
+
+**5. Excel Export Errors**
+The code automatically removes illegal Excel characters. If you still encounter issues:
+- Check `clean_for_excel()` function in `run_mathv.py`
+- Ensure `openpyxl` is installed
+
+**6. LaTeX Conversion Errors**
+Install `latex2sympy2` for better LaTeX support:
+```bash
+pip install latex2sympy2
+```
 
 ## Advanced Usage
 
 ### Custom Image Resolution
 
-Edit `run_mmmu.py` to modify image resolution:
+Edit `run_mathv.py` to modify image resolution:
 
 ```python
-MIN_PIXELS = 1280*28*28  # ~1M pixels
+MIN_PIXELS = 768*28*28   # ~0.6M pixels
 MAX_PIXELS = 5120*28*28  # ~4M pixels
 ```
 
-### Custom Evaluation Logic
+### Custom Evaluation Prompts
 
-The evaluation uses a two-stage approach:
-1. **Rule-based extraction**: Fast pattern matching for clear answers
-2. **Model-based extraction**: GPT judge for ambiguous answers
+The evaluation uses in-context examples defined in `eval_utils.py`:
+- Edit `get_gpt4_ICE()` to customize examples
+- Edit `build_mathv_gpt4_prompt()` to modify prompt structure
 
-To customize, edit `eval_utils.py`:
-- `can_infer_option()`: Modify option extraction rules
-- `can_infer_text()`: Modify text matching logic
-- `build_prompt()`: Customize judge prompt
+### Testing with Limited Samples
+
+Use `--num-samples` for quick testing:
+
+```bash
+python run_mathv.py infer \
+    --model-path /path/to/model \
+    --data-dir /path/to/data \
+    --dataset MathVision \
+    --output-file results/test.jsonl \
+    --num-samples 100
+```
 
 ### Debugging
 
-Enable debug mode to process only 5 samples:
+Enable debug mode for detailed logs:
 
 ```bash
-DEBUG=true python run_mmmu.py eval ...
+DEBUG=true python run_mathv.py eval ...
 ```
+
+This processes only the first 5 samples in single-threaded mode.
 
 ## Citation
 
-If you use this code or the MMMU benchmark, please cite:
+If you use this code or the MathVision benchmark, please cite:
 
 ```bibtex
-@article{yue2023mmmu,
-  title={Mmmu: A massive multi-discipline multimodal understanding and reasoning benchmark for expert agi},
-  author={Yue, Xiang and Ni, Yuansheng and Zhang, Kai and Zheng, Tianyu and Liu, Ruoqi and Zhang, Ge and Stevens, Samuel and Jiang, Dongfu and Ren, Weiming and Sun, Yuxuan and others},
-  journal={arXiv:2311.16502},
-  year={2023}
+@article{mathvision,
+  title={Measuring Multimodal Mathematical Reasoning with MATH-Vision Dataset}, 
+  author={Ke Wang and Junting Pan and Weikang Shi and Zimu Lu and Mingjie Zhan and Hongsheng Li},
+  journal={arXiv:2402.14804},
+  year={2024}
 }
 ```
 
