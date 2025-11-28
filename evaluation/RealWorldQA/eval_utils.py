@@ -1,3 +1,9 @@
+"""
+RealWorldQA Evaluation Utilities
+
+Evaluation utilities, fully independent of VLMEvalKit.
+"""
+
 import os
 import requests
 import time
@@ -201,7 +207,6 @@ def can_infer_option(answer, choices):
     if count == 1:
         for ch in choices:
             if 'A' in splits and len(splits) > 3:
-                # print(f'A might be a quantifier in the string: {answer}.')
                 return False
             if ch in splits:
                 return ch
@@ -231,6 +236,7 @@ def can_infer(answer, choices):
     return copt if copt else can_infer_text(answer, choices)
 
 def build_choices(item):
+    """Build choices dictionary from item."""
     ret = {}
     for ch in string.ascii_uppercase:
         if ch in item and (not pd.isna(item[ch])):
@@ -238,6 +244,7 @@ def build_choices(item):
     return ret
 
 def build_option_str(option_dict):
+    """Build option string for prompt."""
     s = 'There are several options: \n'
     for c, content in option_dict.items():
         if not pd.isna(content):
@@ -245,6 +252,7 @@ def build_option_str(option_dict):
     return s
 
 def build_prompt(question, options, prediction):
+    """Build prompt for answer extraction."""
     tmpl = (
         'You are an AI assistant who will help me to match '
         'an answer with several options of a single-choice question. '
@@ -286,12 +294,16 @@ def extract_answer_from_item(model, item, wait=5):
     # If rule-based extraction fails, use model-based extraction
     print(f"Rule extract failed. Use model-based extraction.")
     if model is None:
-       assert model is not None, 'Judge model is None for MMMU_DEV_VAL !!!'
+        # For RealWorldQA, if model is None, use random choice
+        options = list(choices) + ['Z'] if 'Z' not in choices else list(choices)
+        log = f'No judge model provided. Randomly generate one.\n'
+        return dict(opt=random.choice(options), log=log, extract_model='random', extract_flag=False)
     
     # Try model-based extraction with retries
-    retry = 25
+    retry = 5
     while retry:
-        ans = model.generate([{"type": "text", "value": prompt}])
+        messages_for_judge = [{'type': 'text', 'value': prompt}]
+        ans = model.generate(messages_for_judge)
         if 'Failed to obtain answer via API' in ans:
             print('API failed to answer.')
         else:
@@ -302,11 +314,9 @@ def extract_answer_from_item(model, item, wait=5):
             else:
                 print(f'Output includes 0 / > 1 letter among candidates {set(choices)} and Z: {ans}')
         retry -= 1
-        T = random.random() * wait * 2
-        time.sleep(T)
         
-        if retry == 0:
-            options = list(choices) + ['Z'] if 'Z' not in choices else list(choices)
+        if retry <= 0:
+            options = list(choices) + ['Z'] if 'Z' not in choices else []
             log = f'{model.model} extract failed. randomly generate one. {model.model} response:{ans}\n'
             return dict(opt=random.choice(options), log=log, extract_model=model.model, extract_flag=False)
 
@@ -317,18 +327,21 @@ def eval_single_sample(args):
     # Extract answer using the combined approach
     result = extract_answer_from_item(model, item)
     
+    # Get ground truth answer
+    gt_answer = item['answer']
+    
     # Determine if the answer is correct
-    hit = 1 if result['opt'] == item['GT'] else 0
+    hit = 1 if result['opt'] == gt_answer else 0
     
     return {
         "index": item['index'],
-        "split": item['split'],
         "question": item['question'],
         "prediction": item['prediction'],
         "extracted_answer": result['opt'],
         "extraction_method": result['extract_model'],
         "extraction_success": result['extract_flag'],
         "extraction_log": result['log'],
-        "gt": item['GT'],
+        "gt": gt_answer,
         "hit": hit
     }
+

@@ -4,11 +4,19 @@ import numpy as np
 from typing import Dict, Any
 from common_utils import download_file, md5, toliststr, decode_base64_to_image_file
 
-MMMU_DATASET_URL = 'https://opencompass.openxlab.space/utils/VLMEval/MMMU_DEV_VAL.tsv'
-MMMU_DATASET_MD5 = '521afc0f3bf341e6654327792781644d'
+# MathVision dataset URLs and MD5
+MATHVISION_DATASET_URL = {
+    'MathVision': 'https://opencompass.openxlab.space/utils/VLMEval/MathVision.tsv',
+    'MathVision_MINI': 'https://opencompass.openxlab.space/utils/VLMEval/MathVision_MINI.tsv'
+}
 
-def load_dataset(dataset_name='MMMU_DEV_VAL'):
-    """Load the MMMU dataset."""
+MATHVISION_DATASET_MD5 = {
+    'MathVision': '93f6de14f7916e598aa1b7165589831e',
+    'MathVision_MINI': '060fe4fa5d868987ce179307bd5f8a33'
+}
+
+def load_dataset(dataset_name='MathVision'):
+    """Load the MathVision dataset."""
     data_root = os.path.join(os.environ['LMUData'])
     os.makedirs(data_root, exist_ok=True)
     
@@ -16,9 +24,11 @@ def load_dataset(dataset_name='MMMU_DEV_VAL'):
     data_path = os.path.join(data_root, file_name)
     
     # Download if not exists or MD5 doesn't match
-    if not os.path.exists(data_path) or md5(data_path) != MMMU_DATASET_MD5:
-        print(f"Downloading {dataset_name} dataset...")
-        download_file(MMMU_DATASET_URL, data_path)
+    if dataset_name in MATHVISION_DATASET_MD5:
+        expected_md5 = MATHVISION_DATASET_MD5[dataset_name]
+        if not os.path.exists(data_path) or md5(data_path) != expected_md5:
+            print(f"Downloading {dataset_name} dataset...")
+            download_file(MATHVISION_DATASET_URL[dataset_name], data_path)
     
     # Load the dataset
     data = pd.read_csv(data_path, sep='\t')
@@ -73,22 +83,3 @@ def dump_image(line, img_root):
         tgt_path = toliststr(line['image_path'])
     
     return tgt_path
-
-def MMMU_preproc(data):
-    """
-    Preprocess MMMU dataset to reformulate open questions to multi-choice ones.
-    This aligns with the implementation in multiple_choice.py
-    """
-    print("Preprocessing MMMU dataset...")
-    cnt = 0
-    As, Bs, Ans = list(data['A']), list(data['B']), list(data['answer'])
-    lt = len(data)
-    for i in range(lt):
-        if pd.isna(As[i]):
-            As[i] = Ans[i]
-            Bs[i] = 'Other Answers'
-            cnt += 1
-    print(f'During MMMU_preproc in Evaluation, {cnt} open questions are re-formulated to multi-choice ones.')
-    data['A'] = As
-    data['B'] = Bs
-    return data

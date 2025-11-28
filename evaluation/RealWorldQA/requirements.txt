@@ -10,4 +10,5 @@ validators
 torch
 torchvision
 accelerate
+sentencepiece
 flash_attn

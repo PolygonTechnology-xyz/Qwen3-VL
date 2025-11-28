@@ -5,11 +5,11 @@ import argparse
 import pandas as pd
 import numpy as np
 import time
+import re
 from tqdm import tqdm
 from typing import List, Dict, Any
 import torch
 import warnings
-import string
 import traceback
 
 # vLLM imports
@@ -18,36 +18,41 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor
 
 # Local imports from refactored files
-from dataset_utils import load_dataset, dump_image, MMMU_preproc
-from eval_utils import build_judge, eval_single_sample
+from dataset_utils import load_dataset, dump_image
+from eval_utils import build_judge, eval_single_sample, MATH_V_acc
 
 # Set vLLM multiprocessing method
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
-def build_mmmu_prompt(line, dump_image_func, dataset):
-    """Build MMMU dataset prompt with standard resolution settings."""
-    # Standard resolution settings
-    MIN_PIXELS = 1280*28*28  # ~1M pixels
+def clean_for_excel(val):
+    """
+    Remove characters that are illegal in Excel cells.
+    Excel doesn't support control characters (0x00-0x1F) except tab, newline, carriage return.
+    """
+    if isinstance(val, str):
+        # Remove control characters (0x00-0x1F) except tab(0x09), newline(0x0A), carriage return(0x0D)
+        return re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F]', '', val)
+    return val
+
+def clean_dataframe_for_excel(df):
+    """Clean all string columns in a DataFrame for Excel compatibility."""
+    return df.applymap(clean_for_excel) if hasattr(df, 'applymap') else df.map(clean_for_excel)
+
+def build_mathv_prompt(line, dump_image_func, dataset):
+    """
+    Build MathVision dataset prompt.
+    """
+    # Standard resolution (MathVision uses smaller min_pixels)
+    MIN_PIXELS = 768*28*28  # ~0.6M pixels
     MAX_PIXELS = 5120*28*28  # ~4M pixels
     
     tgt_path = dump_image_func(line)
     question = line['question']
-    options = {cand: line[cand] for cand in string.ascii_uppercase if cand in line and not pd.isna(line[cand])}
-    options_prompt = 'Options:\n'
-    for key, item in options.items():
-        options_prompt += f'{key}. {item}\n'
-    hint = line['hint'] if ('hint' in line and not pd.isna(line['hint'])) else None
-    prompt = ''
-    if hint is not None:
-        prompt += f'Hint: {hint}\n'
-    prompt += f'Question: {question}\n'
-    if len(options):
-        prompt += options_prompt
-        prompt += 'Please select the correct answer from the options above. \n'
-    prompt = prompt.rstrip()
     
     # Build messages in standard conversation format
     content = []
+    
+    # Add all images first
     if isinstance(tgt_path, list):
         for p in tgt_path:
             content.append({
@@ -63,7 +68,9 @@ def build_mmmu_prompt(line, dump_image_func, dataset):
             "min_pixels": MIN_PIXELS,
             "max_pixels": MAX_PIXELS
         })
-    content.append({"type": "text", "text": prompt})
+    
+    # Add question text last
+    content.append({"type": "text", "text": question})
     
     # Return messages in standard conversation format
     messages = [{
@@ -107,17 +114,24 @@ def prepare_inputs_for_vllm(messages, processor):
     }
 
 def run_inference(args):
-    """Run inference on the MMMU dataset using vLLM."""
+    """Run inference on the MathVision dataset using vLLM."""
     print("\n" + "="*80)
-    print("🚀 MMMU Inference with vLLM (High-Speed Mode)")
+    print("🚀 MathVision Inference with vLLM (High-Speed Mode)")
     print("="*80 + "\n")
     
     # Load dataset
     data = load_dataset(args.dataset)
-    print(f"✓ Loaded {len(data)} samples from {args.dataset}")
+    
+    # Limit number of samples if specified
+    if args.num_samples is not None and args.num_samples > 0:
+        original_len = len(data)
+        data = data.iloc[:args.num_samples]
+        print(f"✓ Loaded {len(data)} samples from {args.dataset} (limited from {original_len} samples)")
+    else:
+        print(f"✓ Loaded {len(data)} samples from {args.dataset}")
     
     # Set up image root directory
-    img_root = os.path.join(os.environ['LMUData'], 'images', 'MMMU')
+    img_root = os.path.join(os.environ['LMUData'], 'images', args.dataset)
     os.makedirs(img_root, exist_ok=True)
     
     # Set up dump_image function
@@ -130,7 +144,7 @@ def run_inference(args):
     # Set up CoT prompt if enabled
     cot_prompt = ""
     if args.use_cot:
-        cot_prompt = args.cot_prompt if args.cot_prompt else " If you are uncertain or the problem is too complex, make a reasoned guess based on the information provided. Avoid repeating steps indefinitely—provide your best guess even if unsure. Determine whether to think step by step based on the difficulty of the question, considering all relevant information before answering."
+        cot_prompt = args.cot_prompt if args.cot_prompt else " Let's think step by step."
         print(f"✓ Using CoT prompt: {cot_prompt[:50]}...")
 
     # Set up generation parameters (vLLM SamplingParams format)
@@ -196,7 +210,7 @@ def run_inference(args):
                 line_dict[k] = float(v)
         
         # Build prompt
-        messages = build_mmmu_prompt(line, dump_image_func, args.dataset)
+        messages = build_mathv_prompt(line, dump_image_func, args.dataset)
         
         # Add CoT prompt
         if args.use_cot and len(messages) > 0 and len(messages[0]['content']) > 0:
@@ -268,11 +282,8 @@ def run_evaluation(args):
     data = pd.DataFrame.from_records(results)
     data = data.sort_values(by='index')
     data['prediction'] = [str(x) for x in data['prediction']]
-    # If not choice label, then use lower case
-    for k in data.keys():
-        data[k.lower() if k not in list(string.ascii_uppercase) else k] = data.pop(k)
 
-    # Load dataset
+    # Load dataset for validation
     meta = load_dataset(args.dataset)
 
     # Validation
@@ -282,28 +293,24 @@ def run_evaluation(args):
     data_map = {x: y for x, y in zip(data['index'], data['question'])}
     for k in data_map:
         assert k in meta_q_map, (
-            f'eval_file should be the same as or a subset of dataset MMMU_DEV_VAL'
+            f'eval_file should be the same as or a subset of dataset {args.dataset}'
         )
 
-    answer_map = {i: c for i, c in zip(meta['index'], meta['answer'])}
-    data = MMMU_preproc(data)
-    answer_map = {k: (v if v in list(string.ascii_uppercase) else 'A') for k, v in answer_map.items()}
-    data = data[data['index'].isin(answer_map)]
-    data['GT'] = [answer_map[idx] for idx in data['index']]
-    items = []
-    for i in range(len(data)):
-        item = data.iloc[i]
-        items.append(item)
+    # Save intermediate results
+    output_xlsx = args.output_file.replace('.csv', '.xlsx') if args.output_file.endswith('.csv') else args.output_file
+    clean_dataframe_for_excel(data).to_excel(output_xlsx, index=False)
+    print(f"✓ Saved intermediate results to {output_xlsx}")
 
     # Build judge model
     model = build_judge(
-        model=getattr(args, 'eval_model', 'gpt-3.5-turbo-0125'),
+        model=getattr(args, 'eval_model', 'gpt-4o-2024-05-13'),
         api_type=getattr(args, 'api_type', 'dash')
     )
     
     # Prepare evaluation tasks
     eval_tasks = []
-    for item in items:
+    for i in range(len(data)):
+        item = data.iloc[i]
         eval_tasks.append((model, item))
     
     # Run evaluation
@@ -330,50 +337,45 @@ def run_evaluation(args):
                              total=len(eval_tasks), desc="Evaluating"):
                 eval_results.append(result)
     
-    # Calculate overall accuracy
-    accuracy = sum(r['hit'] for r in eval_results) / len(eval_results)
+    # Update data with evaluation results
+    data['res'] = [r['res'] for r in eval_results]
+    data['log'] = [r['log'] for r in eval_results]
+    data['extract_model'] = [r['extract_model'] for r in eval_results]
+    data['extract_flag'] = [r['extract_flag'] for r in eval_results]
     
-    # Calculate accuracy by split
-    results_by_split = {}
-    for result in eval_results:
-        split = result.get('split', 'unknown')
-        if split not in results_by_split:
-            results_by_split[split] = []
-        results_by_split[split].append(result)
+    # Save evaluation results
+    storage = args.output_file.replace('.csv', '_eval.xlsx')
+    clean_dataframe_for_excel(data).to_excel(storage, index=False)
+    print(f"✓ Saved evaluation results to {storage}")
     
-    accuracy_by_split = {}
-    for split, split_results in results_by_split.items():
-        split_accuracy = sum(r['hit'] for r in split_results) / len(split_results)
-        accuracy_by_split[split] = split_accuracy
-        print(f"Accuracy for {split} split: {split_accuracy:.4f} ({sum(r['hit'] for r in split_results)}/{len(split_results)})")
-    
-    # Save results
-    output_df = pd.DataFrame(eval_results)
-    output_df.to_csv(args.output_file, index=False)
-    
-    # Save accuracy
-    with open(args.output_file.replace('.csv', '_acc.json'), 'w') as f:
-        json.dump({
-            "overall_accuracy": accuracy,
-            "accuracy_by_split": accuracy_by_split
-        }, f, indent=2)
+    # Calculate accuracy
+    score = MATH_V_acc(storage)
+    score_pth = storage.replace('.xlsx', '_score.csv')
+    score.to_csv(score_pth, index=False)
+    print(f"✓ Saved score to {score_pth}")
     
     print(f"\n{'='*50}")
     print(f"Evaluation Results:")
     print(f"{'='*50}")
-    print(f"Overall accuracy: {accuracy:.4f}")
+    print(score)
     print(f"{'='*50}\n")
+    
+    return score
 
 def main():
-    parser = argparse.ArgumentParser(description="MMMU Evaluation with vLLM")
+    parser = argparse.ArgumentParser(description="MathVision Evaluation with vLLM")
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
     # Inference parser
     infer_parser = subparsers.add_parser("infer", help="Run inference with vLLM")
     infer_parser.add_argument("--model-path", type=str, required=True, help="Path to the model")
-    infer_parser.add_argument("--dataset", type=str, default="MMMU_DEV_VAL", help="Dataset name")
-    infer_parser.add_argument("--data-dir", type=str, help="The absolute path of MMMU_DEV_VAL.tsv")
+    infer_parser.add_argument("--dataset", type=str, default="MathVision", 
+                            choices=["MathVision", "MathVision_MINI"],
+                            help="Dataset name")
+    infer_parser.add_argument("--data-dir", type=str, help="The absolute path of MathVision data directory")
     infer_parser.add_argument("--output-file", type=str, required=True, help="Output file path")
+    infer_parser.add_argument("--num-samples", type=int, default=None, 
+                            help="Number of samples to process (default: None, process all samples)")
     infer_parser.add_argument("--use-cot", action="store_true", help="Use Chain-of-Thought prompting")
     infer_parser.add_argument("--cot-prompt", type=str, default="", help="Custom Chain-of-Thought prompt")
     
@@ -383,7 +385,7 @@ def main():
     infer_parser.add_argument("--gpu-memory-utilization", type=float, default=0.9,
                             help="GPU memory utilization (0.0-1.0, default: 0.9)")
     infer_parser.add_argument("--max-model-len", type=int, default=128000,
-                            help="Maximum model context length (default: 128000, balance between performance and memory)")
+                            help="Maximum model context length (default: 128000)")
     infer_parser.add_argument("--max-images-per-prompt", type=int, default=10,
                             help="Maximum images per prompt (default: 10)")
     
@@ -403,12 +405,14 @@ def main():
     
     # Evaluation parser
     eval_parser = subparsers.add_parser("eval", help="Run evaluation")
-    eval_parser.add_argument("--data-dir", type=str, help="The absolute path of MMMU_DEV_VAL.tsv")
+    eval_parser.add_argument("--data-dir", type=str, help="The absolute path of MathVision data directory")
     eval_parser.add_argument("--input-file", type=str, required=True, help="Input file with inference results")
     eval_parser.add_argument("--output-file", type=str, required=True, help="Output file path")
-    eval_parser.add_argument("--dataset", type=str, default="MMMU_DEV_VAL", help="Dataset name")
-    eval_parser.add_argument("--eval-model", type=str, default="gpt-3.5-turbo-0125",
-                            help="Model to use for evaluation (default: gpt-3.5-turbo-0125)")
+    eval_parser.add_argument("--dataset", type=str, default="MathVision",
+                            choices=["MathVision", "MathVision_MINI"],
+                            help="Dataset name")
+    eval_parser.add_argument("--eval-model", type=str, default="gpt-4o",
+                            help="Model to use for evaluation (default: gpt-4o)")
     eval_parser.add_argument("--api-type", type=str, default="dash", choices=["dash", "mit"],
                             help="API type for evaluation")
     eval_parser.add_argument("--nproc", type=int, default=4, help="Number of processes to use")

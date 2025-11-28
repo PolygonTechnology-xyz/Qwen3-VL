@@ -10,4 +10,6 @@ validators
 torch
 torchvision
 accelerate
+pycocotools
+tabulate
 flash_attn
