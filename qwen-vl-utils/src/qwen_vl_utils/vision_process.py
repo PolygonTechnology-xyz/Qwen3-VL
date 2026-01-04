@@ -422,7 +422,7 @@ def fetch_video(ele: Dict[str, Any], image_patch_size: int = 14, return_video_sa
         max_workers = min(MAX_NUM_WORKERS_FETCH_VIDEO, len(ele["video"]))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
-                executor.submit(fetch_image, {"image": video_element, **process_info}, image_factor)
+                executor.submit(fetch_image, {"image": video_element, **process_info}, image_patch_size)
                 for video_element in ele["video"]
             ]
             image_list = [future.result() for future in futures]
