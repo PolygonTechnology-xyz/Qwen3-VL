@@ -4,3 +4,4 @@ __pycache__/
 qwen-vl-finetune/dataset/images/*.jpg
 qwen-vl-finetune/dataset/images/*.png
 qwen-vl-finetune/dataset/*.json
+qwen-vl-finetune/runs/*
