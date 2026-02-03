@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Distributed training configuration
-NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+NPROC_PER_NODE=${NPROC_PER_NODE:-4}
 MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 MASTER_PORT=${MASTER_PORT:-$(shuf -i 20001-29999 -n 1)}
 NNODES=${WORLD_SIZE:-1}
@@ -21,7 +21,7 @@ grad_accum_steps=4
 entry_file=qwenvl/train/train_qwen.py
 
 # Dataset configuration (replace with public dataset names)
-datasets=public_dataset1,public_dataset2
+datasets=dataset
 
 # Output configuration
 run_name="qwen3vl"
@@ -58,7 +58,7 @@ args="
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --run_name ${run_name} \
-    --report_to wandb"
+    --report_to tensorboard"
 
 # Launch training
 torchrun --nproc_per_node=${NPROC_PER_NODE} \
