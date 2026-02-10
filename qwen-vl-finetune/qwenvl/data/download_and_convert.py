@@ -189,6 +189,7 @@ def download_and_convert_ocr_dataset(
     annotations = []
     
     for idx, sample in enumerate(tqdm(dataset, total=total_samples, desc="Converting")):
+        print(f"sample {idx}: {sample}")
         # Extract image and text
         # The dataset format from kavinh07/nid-synth-200k-ocr has 'image' and 'text' columns
         image = sample.get("image")
