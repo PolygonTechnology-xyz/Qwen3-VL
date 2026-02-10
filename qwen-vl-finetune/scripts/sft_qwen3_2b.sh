@@ -1,10 +1,21 @@
 #!/bin/bash
 
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
 # Distributed training configuration
 NPROC_PER_NODE=${NPROC_PER_NODE:-1}
 MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 MASTER_PORT=${MASTER_PORT:-$(shuf -i 20001-29999 -n 1)}
 NNODES=${WORLD_SIZE:-1}
+# HuggingFace Hub configuration
+HUB_TOKEN=${HUB_TOKEN:-""}  # Set your HuggingFace token here
+HUB_MODEL_ID=${HUB_MODEL_ID:-""}  # Set your model repository name here
+
+echo "HuggingFace Token: ${HUB_TOKEN}"
+echo "HuggingFace Model ID: ${HUB_MODEL_ID}"
 
 # DeepSpeed configuration
 deepspeed=./scripts/zero2.json
@@ -91,6 +102,8 @@ echo ""
 
 # Training arguments
 args="
+    --hub_token ${HUB_TOKEN} \
+    --hub_model_id ${HUB_MODEL_ID} \
     --deepspeed ${deepspeed} \
     --model_name_or_path "${llm}" \
     --dataset_use ${datasets} \
