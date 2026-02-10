@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Distributed training configuration
-NPROC_PER_NODE=${NPROC_PER_NODE:-4}
+NPROC_PER_NODE=${NPROC_PER_NODE:-1}
 MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 MASTER_PORT=${MASTER_PORT:-$(shuf -i 20001-29999 -n 1)}
 NNODES=${WORLD_SIZE:-1}
@@ -19,7 +19,7 @@ grad_accum_steps=4
 
 # Dataset configuration
 # Use local shards if available, otherwise download from HuggingFace
-LOCAL_SHARDS_DIR=${LOCAL_SHARDS_DIR:-"/mnt/truenas/datasets/synth/nid_data_synth/shards"}
+LOCAL_SHARDS_DIR=${LOCAL_SHARDS_DIR:-"/workspace/vit_xlm_roberta/shards"}
 DOWNLOAD_SHARDS=${DOWNLOAD_SHARDS:-false}  # Set to true to force download from HuggingFace
 MAX_SAMPLES=${MAX_SAMPLES:-"100"}  # Leave empty for all samples, or set specific number
 DATA_OUTPUT_DIR=dataset
