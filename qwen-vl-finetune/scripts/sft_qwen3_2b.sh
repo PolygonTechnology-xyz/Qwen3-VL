@@ -30,7 +30,7 @@ grad_accum_steps=4
 
 # Dataset configuration
 # Use local shards if available, otherwise download from HuggingFace
-LOCAL_SHARDS_DIR=${LOCAL_SHARDS_DIR:-"/workspace/vit_xlm_roberta/shards"}
+LOCAL_SHARDS_DIR=${LOCAL_SHARDS_DIR:-"/workspace/shards"}
 DOWNLOAD_SHARDS=${DOWNLOAD_SHARDS:-false}  # Set to true to force download from HuggingFace
 MAX_SAMPLES=${MAX_SAMPLES:-"100"}  # Leave empty for all samples, or set specific number
 DATA_OUTPUT_DIR=dataset
