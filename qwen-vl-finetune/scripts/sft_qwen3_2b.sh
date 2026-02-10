@@ -32,7 +32,7 @@ grad_accum_steps=4
 # Use local shards if available, otherwise download from HuggingFace
 LOCAL_SHARDS_DIR=${LOCAL_SHARDS_DIR:-"/workspace/shards"}
 DOWNLOAD_SHARDS=${DOWNLOAD_SHARDS:-false}  # Set to true to force download from HuggingFace
-MAX_SAMPLES=${MAX_SAMPLES:-"100"}  # Leave empty for all samples, or set specific number
+MAX_SAMPLES=${MAX_SAMPLES:-""}  # Leave empty for all samples, or set specific number
 DATA_OUTPUT_DIR=dataset
 DATA_OUTPUT_NAME=ocr_dataset
 
