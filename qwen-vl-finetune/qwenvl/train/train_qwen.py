@@ -187,15 +187,21 @@ def train(attn_implementation="flash_attention_2"):
     trainer = Trainer(
         model=model, processing_class=tokenizer, args=training_args, **data_module
     )
+    try:
+        if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+            logging.info("checkpoint found, resume training")
+            trainer.train(resume_from_checkpoint=True)
+        else:
+            trainer.train()
+    except Exception as e:
+        logging.error(f"Training failed: {e}")
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
-        logging.info("checkpoint found, resume training")
-        trainer.train(resume_from_checkpoint=True)
-    else:
-        trainer.train()
     finally:
-        trainer.push_to_hub()
-        
+        if training_args.hub_model_id and training_args.hub_token:        
+            trainer.push_to_hub()
+        else:
+            logging.info("HuggingFace Hub credentials not provided, skipping push to hub.")
+
     trainer.save_state()
 
     model.config.use_cache = True
@@ -206,4 +212,4 @@ def train(attn_implementation="flash_attention_2"):
 
 
 if __name__ == "__main__":
-    train(attn_implementation="flash_attention_2")
+    train(attn_implementation="eager")
