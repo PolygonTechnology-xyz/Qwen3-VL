@@ -189,11 +189,12 @@ def download_and_convert_ocr_dataset(
     annotations = []
     
     for idx, sample in enumerate(tqdm(dataset, total=total_samples, desc="Converting")):
-        print(f"sample {idx}: {sample}")
+        if idx==0:
+            print(f"sample {idx}: {sample}")
         # Extract image and text
-        # The dataset format from kavinh07/nid-synth-200k-ocr has 'image' and 'text' columns
-        image = sample.get("image")
-        text = sample.get("text", sample.get("label", ""))
+        # The dataset format from kavinh07/nid-synth-200k-ocr has 'jpg' and 'txt' columns
+        image = sample.get("jpg")
+        text = sample.get("txt", "")
         
         if image is None or not text:
             continue
