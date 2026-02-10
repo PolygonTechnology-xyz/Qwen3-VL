@@ -7,3 +7,4 @@ accelerate==1.7.0
 torchcodec==0.2
 peft==0.17.1
 datasets==4.5.0
+tensorboard==2.20.0
