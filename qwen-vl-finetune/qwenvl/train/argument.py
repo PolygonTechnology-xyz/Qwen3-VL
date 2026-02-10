@@ -43,3 +43,5 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_r: int = field(default=64)
     lora_alpha: int = field(default=128)
     lora_dropout: float = field(default=0.0)
+    hub_model_id: Optional[str] = field(default=None, metadata={"help": "The name of the repository to keep in sync with the local `output_dir`."})
+    hub_token: Optional[str] = field(default=None, metadata={"help": "The token to use to push to the Model Hub."})
