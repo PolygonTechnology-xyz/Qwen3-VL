@@ -193,7 +193,9 @@ def train(attn_implementation="flash_attention_2"):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
-    trainer.push_to_hub()
+    finally:
+        trainer.push_to_hub()
+        
     trainer.save_state()
 
     model.config.use_cache = True
