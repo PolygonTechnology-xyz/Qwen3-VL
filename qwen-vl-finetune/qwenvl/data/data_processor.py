@@ -677,15 +677,19 @@ class FlattenedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset
 
 def make_supervised_data_module(processor, data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = LazySupervisedDataset(processor, data_args=data_args)
+    dataset = LazySupervisedDataset(processor, data_args=data_args)
+    print(dataset[0])
+    train_dataset, eval_dataset = torch.utils.data.random_split(
+        dataset, [int(len(dataset) * 0.99), len(dataset) - int(len(dataset) * 0.99)]
+    )
     if data_args.data_flatten or data_args.data_packing:
         data_collator = FlattenedDataCollatorForSupervisedDataset(processor.tokenizer)
         return dict(
-            train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator
+            train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator
         )
     data_collator = DataCollatorForSupervisedDataset(processor.tokenizer)
     return dict(
-        train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator
+        train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator
     )
 
 

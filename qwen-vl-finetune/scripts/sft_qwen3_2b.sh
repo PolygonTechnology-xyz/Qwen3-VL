@@ -120,7 +120,7 @@ args="
     --gradient_accumulation_steps ${grad_accum_steps} \
     --max_pixels 50176 \
     --min_pixels 784 \
-    --eval_strategy "no" \
+    --eval_strategy "steps" \
     --save_strategy "steps" \
     --save_steps 1000 \
     --save_total_limit 1 \
