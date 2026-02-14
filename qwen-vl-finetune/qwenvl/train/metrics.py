@@ -3,7 +3,7 @@ Character Error Rate (CER) and Word Error Rate (WER) implementations using jiwer
 """
 
 from typing import List
-from jiwer import cer, wer, normalize_intensity
+from jiwer import cer, wer
 
 
 def compute_metrics_batch(
