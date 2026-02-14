@@ -39,7 +39,7 @@ from qwenvl.train.argument import (
     DataArguments,
     TrainingArguments,
 )
-from transformers import AutoProcessor, Trainer
+from transformers import AutoProcessor, Trainer, EarlyStoppingCallback
 
 local_rank = None
 
@@ -184,8 +184,17 @@ def train(attn_implementation="flash_attention_2"):
             model.model.print_trainable_parameters()
     
     data_module = make_supervised_data_module(processor, data_args=data_args)
+
+    callbacks = []
+    if training_args.early_stopping_patience > 0:
+        callbacks.append(
+            EarlyStoppingCallback(
+                early_stopping_patience=training_args.early_stopping_patience
+            )
+        )
+    
     trainer = Trainer(
-        model=model, processing_class=tokenizer, args=training_args, **data_module
+        model=model, processing_class=tokenizer, args=training_args, callbacks=callbacks, **data_module
     )
     try:
         if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
@@ -212,4 +221,4 @@ def train(attn_implementation="flash_attention_2"):
 
 
 if __name__ == "__main__":
-    train(attn_implementation="eager")
+    train(attn_implementation="flash_attention_2")

@@ -1,3 +1,5 @@
 dataset/*
 output/*
 .env
+train.log
+tensorboard.log
