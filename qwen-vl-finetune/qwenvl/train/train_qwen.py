@@ -186,12 +186,11 @@ def train(attn_implementation="flash_attention_2"):
     data_module = make_supervised_data_module(processor, data_args=data_args)
 
     callbacks = []
-    if training_args.early_stopping_patience > 0:
-        callbacks.append(
-            EarlyStoppingCallback(
-                early_stopping_patience=training_args.early_stopping_patience
-            )
+    callbacks.append(
+        EarlyStoppingCallback(
+            early_stopping_patience=5
         )
+    )
     
     trainer = Trainer(
         model=model, processing_class=tokenizer, args=training_args, callbacks=callbacks, **data_module

@@ -116,7 +116,6 @@ args="
     --bf16 \
     --output_dir ${output_dir} \
     --num_train_epochs 0.5 \
-    --early_stopping_patience 5 \
     --per_device_train_batch_size ${batch_size} \
     --per_device_eval_batch_size $((batch_size*2)) \
     --gradient_accumulation_steps ${grad_accum_steps} \
@@ -127,6 +126,8 @@ args="
     --save_steps 500 \
     --eval_steps 500 \
     --eval_on_start True \
+    --metric_for_best_model "eval_loss" \
+    --load_best_model_at_end True \
     --save_total_limit 1 \
     --learning_rate ${lr} \
     --weight_decay 0 \
