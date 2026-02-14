@@ -39,7 +39,9 @@ from qwenvl.train.argument import (
     DataArguments,
     TrainingArguments,
 )
-from transformers import AutoProcessor, Trainer
+from transformers import AutoProcessor, Trainer, EarlyStoppingCallback
+from qwenvl.train.callbacks import CustomGenerationCallback
+from qwenvl.train.metrics import compute_metrics_batch
 
 local_rank = None
 
@@ -87,6 +89,66 @@ def set_model(model_args, model):
         for n, p in model.language_model.named_parameters():
             p.requires_grad = False
         model.lm_head.requires_grad = False
+
+
+def create_compute_metrics_fn(processor):
+    """
+    Create a compute_metrics function for CER and WER evaluation.
+    
+    Args:
+        processor: Model processor for decoding
+    
+    Returns:
+        compute_metrics function compatible with Trainer
+    """
+    def compute_metrics(eval_preds):
+        from transformers.trainer_utils import EvalPrediction
+        
+        predictions, labels = eval_preds
+        
+        # Decode predictions and labels
+        decoded_preds = []
+        decoded_labels = []
+        
+        for pred, label in zip(predictions, labels):
+            # Handle variable length sequences
+            if isinstance(pred, (list, tuple)):
+                pred_ids = pred
+            else:
+                pred_ids = pred.tolist() if hasattr(pred, 'tolist') else pred
+            
+            if isinstance(label, (list, tuple)):
+                label_ids = label
+            else:
+                label_ids = label.tolist() if hasattr(label, 'tolist') else label
+            
+            # Replace -100 (ignored tokens) with pad token
+            label_ids = [l if l != -100 else processor.tokenizer.pad_token_id for l in label_ids]
+            
+            try:
+                decoded_pred = processor.decode(pred_ids, skip_special_tokens=True)
+                decoded_label = processor.decode(label_ids, skip_special_tokens=True)
+                
+                decoded_preds.append(decoded_pred)
+                decoded_labels.append(decoded_label)
+            except Exception as e:
+                rank0_print(f"Error decoding: {e}")
+                continue
+        
+        # Compute CER and WER
+        if decoded_preds and decoded_labels:
+            metrics_result = compute_metrics_batch(decoded_labels, decoded_preds, normalize=True)
+            return {
+                "cer": metrics_result["cer"],
+                "wer": metrics_result["wer"],
+            }
+        else:
+            return {
+                "cer": 0.0,
+                "wer": 0.0,
+            }
+    
+    return compute_metrics
 
 
 def train(attn_implementation="flash_attention_2"):
@@ -184,9 +246,44 @@ def train(attn_implementation="flash_attention_2"):
             model.model.print_trainable_parameters()
     
     data_module = make_supervised_data_module(processor, data_args=data_args)
-    trainer = Trainer(
-        model=model, processing_class=tokenizer, args=training_args, **data_module
+    
+    # Initialize callbacks
+    callbacks = []
+    
+    # Add built-in early stopping callback (monitors CER by default)
+    # Note: metric_for_best_model is set in TrainingArguments, not here
+    early_stopping_callback = EarlyStoppingCallback(
+        early_stopping_patience=3,
+        early_stopping_threshold=0.0,
     )
+    callbacks.append(early_stopping_callback)
+    rank0_print("Early stopping callback enabled (monitoring CER)")
+    
+    if training_args.enable_generation_callback and data_module.get("eval_dataset") is not None:
+        generation_callback = CustomGenerationCallback(
+            eval_dataset=data_module["eval_dataset"],
+            processor=processor,
+            output_dir=training_args.output_dir,
+            num_samples=training_args.generation_callback_num_samples,
+            max_new_tokens=training_args.generation_callback_max_tokens,
+            log_to_tensorboard=True,
+        )
+        callbacks.append(generation_callback)
+        rank0_print("Generation callback enabled")
+    
+    trainer = Trainer(
+        model=model, 
+        processing_class=tokenizer, 
+        args=training_args, 
+        callbacks=callbacks,
+        compute_metrics=create_compute_metrics_fn(processor),
+        **data_module
+    )
+    
+    # Set trainer reference for generation callback to enable model access
+    for callback in callbacks:
+        if isinstance(callback, CustomGenerationCallback):
+            callback.trainer = trainer
     try:
         if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
             logging.info("checkpoint found, resume training")
@@ -212,4 +309,4 @@ def train(attn_implementation="flash_attention_2"):
 
 
 if __name__ == "__main__":
-    train(attn_implementation="eager")
+    train(attn_implementation="flash_attention_2")

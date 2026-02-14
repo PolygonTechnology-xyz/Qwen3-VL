@@ -45,3 +45,18 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_dropout: float = field(default=0.0)
     hub_model_id: Optional[str] = field(default=None, metadata={"help": "The name of the repository to keep in sync with the local `output_dir`."})
     hub_token: Optional[str] = field(default=None, metadata={"help": "The token to use to push to the Model Hub."})
+    
+    ## Callback config
+    enable_generation_callback: bool = field(default=False, metadata={"help": "Enable custom generation callback"})
+    generation_callback_num_samples: int = field(default=5, metadata={"help": "Number of samples to generate per evaluation step"})
+    generation_callback_max_tokens: int = field(default=100, metadata={"help": "Maximum new tokens to generate"})
+    
+    def __post_init__(self):
+        super().__post_init__()
+        # Set CER as default metric for best model if not specified
+        # Note: trainer prefixes metrics with eval_ during evaluation
+        if self.metric_for_best_model is None:
+            self.metric_for_best_model = "eval_cer"
+        # Ensure greater_is_better is set correctly for CER (lower is better)
+        if self.metric_for_best_model == "eval_cer" and not hasattr(self, "_greater_is_better_set"):
+            self.greater_is_better = False
