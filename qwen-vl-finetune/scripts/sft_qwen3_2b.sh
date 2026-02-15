@@ -25,7 +25,7 @@ deepspeed=./scripts/zero2.json
 llm=Qwen/Qwen3-VL-2B-Instruct  # Using Qwen3-VL-4B model
 
 # Training hyperparameters
-lr=1e-5
+lr=2e-05
 batch_size=4
 grad_accum_steps=4
 
@@ -112,10 +112,11 @@ args="
     --tune_mm_vision False \
     --tune_mm_mlp True \
     --tune_mm_llm True \
-    --lora_enable False \
+    --lora_enable True \
+    --do_train True \
     --bf16 \
     --output_dir ${output_dir} \
-    --num_train_epochs 0.5 \
+    --num_train_epochs 10 \
     --per_device_train_batch_size ${batch_size} \
     --per_device_eval_batch_size $((batch_size*2)) \
     --gradient_accumulation_steps ${grad_accum_steps} \
@@ -123,8 +124,8 @@ args="
     --min_pixels 784 \
     --eval_strategy "steps" \
     --save_strategy "steps" \
-    --save_steps 500 \
-    --eval_steps 500 \
+    --save_steps 250 \
+    --eval_steps 250 \
     --eval_on_start True \
     --metric_for_best_model "eval_loss" \
     --load_best_model_at_end True \
@@ -134,7 +135,7 @@ args="
     --warmup_ratio 0.03 \
     --max_grad_norm 1 \
     --lr_scheduler_type "cosine" \
-    --logging_steps 100 \
+    --logging_steps 50 \
     --model_max_length 8192 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \

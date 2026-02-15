@@ -47,7 +47,29 @@ def flash_attention_forward(
             "`flash_attention_2` does not support `output_attentions=True` or `head_mask`."
             " Please set your attention to `eager` if you want any of these features."
         )
-    
+
+    # Check if attention_mask is in cu_seqlens format (1D int tensor) for flash_attn_varlen_func.
+    # During generation (autoregressive decoding), attention_mask is a standard 2D/4D causal mask
+    # or None, so we fall back to SDPA in that case.
+    is_cu_seqlens = (
+        attention_mask is not None
+        and attention_mask.dim() == 1
+        and attention_mask.dtype in (torch.int32, torch.int64)
+        and attention_mask.size(0) >= 2
+    )
+
+    if not is_cu_seqlens:
+        # Fall back to scaled dot-product attention (used during generation)
+        import torch.nn.functional as F
+        # query/key/value: [batch, heads, seq_len, dim]
+        attn_output = F.scaled_dot_product_attention(
+            query, key, value,
+            attn_mask=attention_mask if attention_mask is not None and attention_mask.dim() >= 2 else None,
+            dropout_p=dropout if module.training else 0.0,
+            is_causal=attention_mask is None,
+        )
+        return attn_output, None
+
     # This is before the transpose
     seq_len = query.shape[2]
 

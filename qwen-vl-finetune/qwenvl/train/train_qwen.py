@@ -40,6 +40,8 @@ from qwenvl.train.argument import (
     TrainingArguments,
 )
 from transformers import AutoProcessor, Trainer, EarlyStoppingCallback
+from qwenvl.train.callbacks import CustomGenerationCallback
+from qwenvl.train.metrics import compute_metrics_batch
 
 local_rank = None
 
@@ -87,6 +89,94 @@ def set_model(model_args, model):
         for n, p in model.language_model.named_parameters():
             p.requires_grad = False
         model.lm_head.requires_grad = False
+
+def preprocess_logits_for_metrics(logits, labels):
+    """
+    Convert raw logits to predicted token IDs before they reach compute_metrics.
+    The Trainer passes raw logits by default; without this, compute_metrics
+    receives floats instead of token IDs.
+    """
+    if isinstance(logits, tuple):
+        logits = logits[0]
+    return logits.argmax(dim=-1)
+
+
+def create_compute_metrics_fn(processor):
+    """
+    Create a compute_metrics function for CER and WER evaluation.
+    
+    Args:
+        processor: Model processor for decoding
+    
+    Returns:
+        compute_metrics function compatible with Trainer
+    """
+    def compute_metrics(eval_preds):
+        from transformers.trainer_utils import EvalPrediction
+        
+        predictions, labels = eval_preds
+        
+        # Decode predictions and labels
+        decoded_preds = []
+        decoded_labels = []
+        
+        for pred, label in zip(predictions, labels):
+            # Handle variable length sequences
+            if isinstance(pred, (list, tuple)):
+                pred_ids = pred
+            else:
+                pred_ids = pred.tolist() if hasattr(pred, 'tolist') else pred
+            
+            if isinstance(label, (list, tuple)):
+                label_ids = label
+            else:
+                label_ids = label.tolist() if hasattr(label, 'tolist') else label
+            
+            # Ensure pred_ids and label_ids are flat 1D lists
+            if isinstance(pred_ids, list) and len(pred_ids) > 0 and isinstance(pred_ids[0], (list, tuple)):
+                pred_ids = pred_ids[0]
+            if isinstance(label_ids, list) and len(label_ids) > 0 and isinstance(label_ids[0], (list, tuple)):
+                label_ids = label_ids[0]
+            
+            # Convert to integers (they should already be token IDs from preprocess_logits_for_metrics)
+            pred_ids = [int(p) for p in pred_ids if int(p) != -100]
+            
+            # Replace -100 (ignored tokens) with pad token, filter out -100 from labels  
+            label_ids = [int(l) for l in label_ids if int(l) != -100]
+            
+            # Filter out-of-range token IDs as a safety net
+            vocab_size = len(processor.tokenizer)
+            pred_ids = [p for p in pred_ids if 0 <= p < vocab_size]
+            label_ids = [l for l in label_ids if 0 <= l < vocab_size]
+            
+            # Skip if empty
+            if not pred_ids or not label_ids:
+                continue
+            
+            try:
+                decoded_pred = processor.tokenizer.decode(pred_ids, skip_special_tokens=True)
+                decoded_label = processor.tokenizer.decode(label_ids, skip_special_tokens=True)
+                
+                decoded_preds.append(decoded_pred)
+                decoded_labels.append(decoded_label)
+            except Exception as e:
+                rank0_print(f"Error decoding: {e}")
+                continue
+        
+        # Compute CER and WER
+        if decoded_preds and decoded_labels:
+            metrics_result = compute_metrics_batch(decoded_labels, decoded_preds, normalize=True)
+            return {
+                "cer": metrics_result["cer"],
+                "wer": metrics_result["wer"],
+            }
+        else:
+            return {
+                "cer": 0.0,
+                "wer": 0.0,
+            }
+    
+    return compute_metrics
 
 
 def train(attn_implementation="flash_attention_2"):
@@ -191,6 +281,19 @@ def train(attn_implementation="flash_attention_2"):
             early_stopping_patience=5
         )
     )
+
+    # if data_module.get("eval_dataset") is not None:
+    #     generation_callback = CustomGenerationCallback(
+    #         eval_dataset=data_module["eval_dataset"],
+    #         model=model,
+    #         processor=processor,
+    #         output_dir=training_args.output_dir,
+    #         log_to_tensorboard=True,
+    #         dataset_json_path="dataset/ocr_dataset.json",
+    #         dataset_images_dir="dataset/ocr_dataset_images",
+    #     )
+    #     callbacks.append(generation_callback)
+    #     rank0_print("Generation callback enabled (loads fresh samples from OCR dataset for generation)")
     
     trainer = Trainer(
         model=model, processing_class=tokenizer, args=training_args, callbacks=callbacks, **data_module

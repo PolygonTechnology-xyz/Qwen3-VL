@@ -680,7 +680,7 @@ def make_supervised_data_module(processor, data_args) -> Dict:
     dataset = LazySupervisedDataset(processor, data_args=data_args)
     print(dataset[0])
     train_dataset, eval_dataset = torch.utils.data.random_split(
-        dataset, [int(len(dataset) * 0.99), len(dataset) - int(len(dataset) * 0.99)]
+        dataset, [int(len(dataset) * 0.999), len(dataset) - int(len(dataset) * 0.999)]
     )
     if data_args.data_flatten or data_args.data_packing:
         data_collator = FlattenedDataCollatorForSupervisedDataset(processor.tokenizer)
